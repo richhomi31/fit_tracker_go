@@ -9,54 +9,105 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// --- СТРУКТУРЫ ДЛЯ JSON ---
+
+type StrengthSet struct {
+	SetNumber int     `json:"set_number"`
+	WeightKg  float64 `json:"weight_kg"`
+	Reps      int     `json:"reps"`
+}
+
+type CardioSet struct {
+	DurationSeconds int     `json:"duration_seconds"`
+	DistanceM       float64 `json:"distance_m,omitempty"`
+}
+
+type WorkoutExercise struct {
+	ExerciseID int           `json:"exercise_id"`
+	Type       string        `json:"type"`                 // "strength", "cardio", "cardio_gps"
+	Sets       []StrengthSet `json:"sets,omitempty"`       // Для силовых
+	Cardio     *CardioSet    `json:"cardio,omitempty"`     // Для кардио
+	GPSPoints  []string      `json:"gps_points,omitempty"` // Для cardio_gps (в реале тут struct с lat/lon)
+}
+
+type CreateWorkoutRequest struct {
+	UserID     int               `json:"user_id"`
+	StartedAt  string            `json:"started_at"`
+	FinishedAt string            `json:"finished_at"`
+	Notes      string            `json:"notes"`
+	Exercises  []WorkoutExercise `json:"exercises"` // Тот самый массив упражнений
+}
+
+// --- УТИЛИТЫ ---
+
 func sendJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
 
-// --- USERS ---
+// --- USERS (Бизнес-процесс 4.1) ---
 
-func getUsers(w http.ResponseWriter, r *http.Request) {
-	// Массив пользователей
-	users := []string{"Иван Иванов", "Петр Петров", "Анна Смирнова"}
-	sendJSON(w, http.StatusOK, users)
-}
-
-func getUserByID(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
-
-	// Имитация получения пользователя по ID
-	sendJSON(w, http.StatusOK, map[string]string{
-		"message": "Пользователь с ID: " + id,
-		"name":    "Иван Иванов",
-		"email":   "ivan@example.com",
+func registerUser(w http.ResponseWriter, r *http.Request) {
+	// В реале тут: парсинг JSON, хэширование пароля, INSERT INTO users
+	sendJSON(w, http.StatusCreated, map[string]string{
+		"message": "Пользователь успешно зарегистрирован",
+		"token":   "jwt_token_placeholder_12345", // Выдача токена (JWT)
 	})
 }
 
-// --- EXERCISES ---
+func loginUser(w http.ResponseWriter, r *http.Request) {
+	// В реале: проверка хэша, выдача JWT
+	sendJSON(w, http.StatusOK, map[string]string{
+		"message": "Успешный вход",
+		"token":   "jwt_token_placeholder_12345",
+	})
+}
+
+// --- EXERCISES (Справочник) ---
 
 func getExercises(w http.ResponseWriter, r *http.Request) {
-	// Массив упражнений
-	exercises := []string{"Жим лежа", "Приседания", "Становая тяга", "Подтягивания"}
+	// Отдаем упражнения с типами (согласно нашей БД)
+	exercises := []map[string]interface{}{
+		{"id": 1, "name": "Жим лежа", "muscle_group": "Грудь", "type": "strength"},
+		{"id": 2, "name": "Приседания", "muscle_group": "Ноги", "type": "strength"},
+		{"id": 3, "name": "Бег на улице", "muscle_group": nil, "type": "cardio_gps"},
+		{"id": 4, "name": "Велотренажер", "muscle_group": nil, "type": "cardio"},
+	}
 	sendJSON(w, http.StatusOK, exercises)
 }
 
-// --- WORKOUTS ---
+// --- WORKOUTS (Бизнес-процесс 4.2) ---
 
 func getWorkouts(w http.ResponseWriter, r *http.Request) {
-	// Массив тренировок
-	workouts := []string{
-		"Тренировка №1: Силовая, сожжено 300 ккал",
-		"Тренировка №2: Кардио, сожжено 500 ккал",
+	workouts := []map[string]interface{}{
+		{"id": 101, "started_at": "2026-11-13T10:00:00Z", "notes": "Утренняя тренировка", "status": "finished"},
+		{"id": 102, "started_at": "2026-11-12T18:00:00Z", "notes": "Вечернее кардио", "status": "finished"},
 	}
 	sendJSON(w, http.StatusOK, workouts)
 }
 
 func createWorkout(w http.ResponseWriter, r *http.Request) {
+	var req CreateWorkoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Неверный формат JSON"})
+		return
+	}
+
+	for _, ex := range req.Exercises {
+		if ex.Type == "strength" && len(ex.Sets) == 0 {
+			sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Для силового упражнения нужны подходы"})
+			return
+		}
+		if ex.Type == "cardio_gps" && ex.Cardio == nil {
+			sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Для GPS кардио нужны данные таймера"})
+			return
+		}
+	}
+
 	sendJSON(w, http.StatusCreated, map[string]string{
-		"message": "Тренировка успешно создана",
+		"message":    "Тренировка и все подходы успешно сохранены",
+		"workout_id": "103",
 	})
 }
 
@@ -64,94 +115,52 @@ func getWorkoutByID(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	sendJSON(w, http.StatusOK, map[string]string{
-		"message": "Детали тренировки с ID: " + id,
-		"type":    "gym",
-		"notes":   "Хорошая тренировка",
-	})
-}
-
-// --- GYM LOG ENTRIES ---
-
-func getGymLogEntries(w http.ResponseWriter, r *http.Request) {
-	// Массив записей о подходах в зале
-	logs := []string{
-		"Подход 1: Жим лежа, 100кг x 10 раз",
-		"Подход 2: Жим лежа, 105кг x 8 раз",
-		"Подход 3: Приседания, 120кг x 5 раз",
+	workoutDetail := map[string]interface{}{
+		"id":         id,
+		"notes":      "Хорошая тренировка",
+		"started_at": "2026-11-13T10:00:00Z",
+		"sets": []map[string]interface{}{
+			{"exercise": "Жим лежа", "set_number": 1, "weight_kg": 80.0, "reps": 10},
+			{"exercise": "Жим лежа", "set_number": 2, "weight_kg": 85.0, "reps": 8},
+			{"exercise": "Бег", "duration_seconds": 1800, "distance_m": 5000.0},
+		},
 	}
-	sendJSON(w, http.StatusOK, logs)
+	sendJSON(w, http.StatusOK, workoutDetail)
 }
 
-func createGymLogEntry(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusCreated, map[string]string{
-		"message": "Запись о подходе добавлена",
-	})
-}
+// --- ОТЧЕТЫ (Бизнес-процесс 4.3) ---
 
-// --- CARDIO DETAILS ---
-
-func getCardioDetails(w http.ResponseWriter, r *http.Request) {
-	// Массив данных кардио
-	cardio := []string{
-		"Кардио №1: Бег, 5км, 6000 шагов, средняя скорость 10 км/ч",
-		"Кардио №2: Ходьба, 3км, 4000 шагов, средняя скорость 5 км/ч",
+func getReports(w http.ResponseWriter, r *http.Request) {
+	// В реале: SQL-агрегации (SUM, COUNT, AVG)
+	// Эмуляция отчета со встроенной математикой
+	report := map[string]interface{}{
+		"period":         "week",
+		"total_tonnage":  12500.5, // SUM(weight_kg * reps)
+		"total_distance": 15000.0, // SUM(distance_m)
+		"workouts_count": 3,
 	}
-	sendJSON(w, http.StatusOK, cardio)
-}
-
-func createCardioDetails(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusCreated, map[string]string{
-		"message": "Данные кардио добавлены",
-	})
-}
-
-// --- GPS POINTS ---
-
-func getGPSPoints(w http.ResponseWriter, r *http.Request) {
-	// Массив GPS точек
-	points := []string{
-		"Точка 1: lat 55.7558, lon 37.6173",
-		"Точка 2: lat 55.7560, lon 37.6180",
-	}
-	sendJSON(w, http.StatusOK, points)
-}
-
-func createGPSPoint(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusCreated, map[string]string{
-		"message": "GPS точка записана",
-	})
+	sendJSON(w, http.StatusOK, report)
 }
 
 // --- MAIN ---
 
 func main() {
-
 	r := mux.NewRouter()
 
-	// Users
-	r.HandleFunc("/users", getUsers).Methods("GET")
-	r.HandleFunc("/users/{id}", getUserByID).Methods("GET")
+	// 1. Авторизация (Бизнес-процесс 4.1)
+	r.HandleFunc("/api/register", registerUser).Methods("POST")
+	r.HandleFunc("/api/login", loginUser).Methods("POST")
 
-	// Exercises
-	r.HandleFunc("/exercises", getExercises).Methods("GET")
+	// 2. Справочник
+	r.HandleFunc("/api/exercises", getExercises).Methods("GET")
 
-	// Workouts
-	r.HandleFunc("/workouts", getWorkouts).Methods("GET")
-	r.HandleFunc("/workouts", createWorkout).Methods("POST")
-	r.HandleFunc("/workouts/{id}", getWorkoutByID).Methods("GET")
+	// 3. Тренировки (Бизнес-процесс 4.2)
+	r.HandleFunc("/api/workouts", getWorkouts).Methods("GET")         // История
+	r.HandleFunc("/api/workouts", createWorkout).Methods("POST")      // Создание (отправка JSON)
+	r.HandleFunc("/api/workouts/{id}", getWorkoutByID).Methods("GET") // Детали
 
-	// Gym Log Entries
-	r.HandleFunc("/logs", getGymLogEntries).Methods("GET")
-	r.HandleFunc("/logs", createGymLogEntry).Methods("POST")
-
-	// Cardio Details
-	r.HandleFunc("/cardio", getCardioDetails).Methods("GET")
-	r.HandleFunc("/cardio", createCardioDetails).Methods("POST")
-
-	// GPS Points
-	r.HandleFunc("/gps", getGPSPoints).Methods("GET")
-	r.HandleFunc("/gps", createGPSPoint).Methods("POST")
+	// 4. Отчеты (Бизнес-процесс 4.3)
+	r.HandleFunc("/api/reports", getReports).Methods("GET")
 
 	fmt.Println("Сервер запущен на http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", r))
