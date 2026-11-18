@@ -9,7 +9,16 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// --- СТРУКТУРЫ ДЛЯ JSON ---
+type UserCredentials struct {
+	Email    string `json:"email"` // используем email как логин
+	Password string `json:"password"`
+}
+
+type Exercise struct {
+	Name        string `json:"name"`
+	MuscleGroup string `json:"muscle_group"`
+	Type        string `json:"type"` // "strength", "cardio", "cardio_gps"
+}
 
 type StrengthSet struct {
 	SetNumber int     `json:"set_number"`
@@ -24,10 +33,9 @@ type CardioSet struct {
 
 type WorkoutExercise struct {
 	ExerciseID int           `json:"exercise_id"`
-	Type       string        `json:"type"`                 // "strength", "cardio", "cardio_gps"
-	Sets       []StrengthSet `json:"sets,omitempty"`       // Для силовых
-	Cardio     *CardioSet    `json:"cardio,omitempty"`     // Для кардио
-	GPSPoints  []string      `json:"gps_points,omitempty"` // Для cardio_gps (в реале тут struct с lat/lon)
+	Type       string        `json:"type"`
+	Sets       []StrengthSet `json:"sets,omitempty"`
+	Cardio     *CardioSet    `json:"cardio,omitempty"`
 }
 
 type CreateWorkoutRequest struct {
@@ -35,10 +43,8 @@ type CreateWorkoutRequest struct {
 	StartedAt  string            `json:"started_at"`
 	FinishedAt string            `json:"finished_at"`
 	Notes      string            `json:"notes"`
-	Exercises  []WorkoutExercise `json:"exercises"` // Тот самый массив упражнений
+	Exercises  []WorkoutExercise `json:"exercises"`
 }
-
-// --- УТИЛИТЫ ---
 
 func sendJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -46,121 +52,183 @@ func sendJSON(w http.ResponseWriter, status int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// --- USERS (Бизнес-процесс 4.1) ---
-
+// USERS
+// Регистрация
 func registerUser(w http.ResponseWriter, r *http.Request) {
-	// В реале тут: парсинг JSON, хэширование пароля, INSERT INTO users
+	var creds UserCredentials
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Неверный формат данных"})
+		return
+	}
+	// В реале: проверка уникальности, хэширование, INSERT INTO users
 	sendJSON(w, http.StatusCreated, map[string]string{
-		"message": "Пользователь успешно зарегистрирован",
-		"token":   "jwt_token_placeholder_12345", // Выдача токена (JWT)
+		"message": "Пользователь зарегистрирован",
+		"user_id": "1",
 	})
 }
 
+// Вход
 func loginUser(w http.ResponseWriter, r *http.Request) {
-	// В реале: проверка хэша, выдача JWT
+	var creds UserCredentials
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Неверный формат данных"})
+		return
+	}
+
 	sendJSON(w, http.StatusOK, map[string]string{
 		"message": "Успешный вход",
-		"token":   "jwt_token_placeholder_12345",
+		"user_id": "1",
+		"name":    "Иван",
 	})
 }
 
-// --- EXERCISES (Справочник) ---
+// удаление
+func deleteUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["id"]
+	// В реале: DELETE FROM users WHERE id = ? (с ON DELETE CASCADE удалятся тренировки)
+	sendJSON(w, http.StatusOK, map[string]string{
+		"message": "Пользователь " + userID + " удален",
+	})
+}
 
+// EXERCISES
+// Просмотр
 func getExercises(w http.ResponseWriter, r *http.Request) {
-	// Отдаем упражнения с типами (согласно нашей БД)
 	exercises := []map[string]interface{}{
-		{"id": 1, "name": "Жим лежа", "muscle_group": "Грудь", "type": "strength"},
-		{"id": 2, "name": "Приседания", "muscle_group": "Ноги", "type": "strength"},
-		{"id": 3, "name": "Бег на улице", "muscle_group": nil, "type": "cardio_gps"},
-		{"id": 4, "name": "Велотренажер", "muscle_group": nil, "type": "cardio"},
+		{"id": 1, "name": "Жим лежа", "type": "strength"},
+		{"id": 2, "name": "Бег на улице", "type": "cardio_gps"},
 	}
 	sendJSON(w, http.StatusOK, exercises)
 }
 
-// --- WORKOUTS (Бизнес-процесс 4.2) ---
-
-func getWorkouts(w http.ResponseWriter, r *http.Request) {
-	workouts := []map[string]interface{}{
-		{"id": 101, "started_at": "2026-11-13T10:00:00Z", "notes": "Утренняя тренировка", "status": "finished"},
-		{"id": 102, "started_at": "2026-11-12T18:00:00Z", "notes": "Вечернее кардио", "status": "finished"},
-	}
-	sendJSON(w, http.StatusOK, workouts)
-}
-
-func createWorkout(w http.ResponseWriter, r *http.Request) {
-	var req CreateWorkoutRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Неверный формат JSON"})
+// Создание
+func createExercise(w http.ResponseWriter, r *http.Request) {
+	var ex Exercise
+	if err := json.NewDecoder(r.Body).Decode(&ex); err != nil {
+		sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Неверный формат"})
 		return
 	}
-
-	for _, ex := range req.Exercises {
-		if ex.Type == "strength" && len(ex.Sets) == 0 {
-			sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Для силового упражнения нужны подходы"})
-			return
-		}
-		if ex.Type == "cardio_gps" && ex.Cardio == nil {
-			sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Для GPS кардио нужны данные таймера"})
-			return
-		}
-	}
-
 	sendJSON(w, http.StatusCreated, map[string]string{
-		"message":    "Тренировка и все подходы успешно сохранены",
-		"workout_id": "103",
+		"message": "Упражнение '" + ex.Name + "' добавлено",
 	})
 }
 
-func getWorkoutByID(w http.ResponseWriter, r *http.Request) {
+// Удаление
+func deleteExercise(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id := vars["id"]
+	exID := vars["id"]
+	sendJSON(w, http.StatusOK, map[string]string{
+		"message": "Упражнение " + exID + " удалено",
+	})
+}
 
-	workoutDetail := map[string]interface{}{
-		"id":         id,
-		"notes":      "Хорошая тренировка",
-		"started_at": "2026-11-13T10:00:00Z",
-		"sets": []map[string]interface{}{
-			{"exercise": "Жим лежа", "set_number": 1, "weight_kg": 80.0, "reps": 10},
-			{"exercise": "Жим лежа", "set_number": 2, "weight_kg": 85.0, "reps": 8},
-			{"exercise": "Бег", "duration_seconds": 1800, "distance_m": 5000.0},
+// WORKOUTS
+// Создание
+func createWorkout(w http.ResponseWriter, r *http.Request) {
+	var req CreateWorkoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Неверный JSON"})
+		return
+	}
+	// Валидация и INSERT в workouts, workout_sets, gps_points
+	sendJSON(w, http.StatusCreated, map[string]string{
+		"message":    "Тренировка сохранена",
+		"workout_id": "100",
+	})
+}
+
+// Обновление, т.е. полная перезапись
+func updateWorkout(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	workoutID := vars["id"]
+
+	var req CreateWorkoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, map[string]string{"error": "Неверный JSON"})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, map[string]string{
+		"message": "Тренировка " + workoutID + " успешно обновлена",
+	})
+}
+
+// Удаление
+func deleteWorkout(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	workoutID := vars["id"]
+	sendJSON(w, http.StatusOK, map[string]string{
+		"message": "Тренировка " + workoutID + " удалена",
+	})
+}
+
+// ОТЧЕТЫ
+
+func getReport1(w http.ResponseWriter, r *http.Request) {
+	// Отчет 1 Прогресс по объему работы
+	// Тоннаж = Сумма (вес * повторения) за каждый месяц
+
+	// типо данные для графика
+	reportData := map[string]interface{}{
+		"report_type": "volume_progress",
+		"exercise":    "Жим лежа",
+		"period":      "month",
+		"labels":      []string{"Июль", "Август", "Сентябрь", "Октябрь"}, // Ось X
+		"data":        []float64{1500.5, 1800.0, 2100.5, 2500.0},         // Ось Y (тоннаж)
+		"unit":        "кг",
+	}
+	sendJSON(w, http.StatusOK, reportData)
+}
+
+func getReport2(w http.ResponseWriter, r *http.Request) {
+	// Отчет 2 Прогресс максимального веса по упражнениям
+	// Список упражнений, по месяцам макс вес и приросn %
+
+	reportData := map[string]interface{}{
+		"report_type": "max_weight_progress",
+		"period":      "month",
+		"exercise_progress": []map[string]interface{}{
+			{
+				"exercise_name": "Жим лежа",
+				"data": []map[string]interface{}{
+					{"month": "Сентябрь", "max_weight": 100.0, "change_percent": 0.0},
+					{"month": "Октябрь", "max_weight": 105.0, "change_percent": 5.0}, // +5%
+				},
+			},
+			{
+				"exercise_name": "Приседания",
+				"data": []map[string]interface{}{
+					{"month": "Сентябрь", "max_weight": 120.0, "change_percent": 0.0},
+					{"month": "Октябрь", "max_weight": 115.0, "change_percent": -4.16}, // -4.16%
+				},
+			},
 		},
 	}
-	sendJSON(w, http.StatusOK, workoutDetail)
+	sendJSON(w, http.StatusOK, reportData)
 }
-
-// --- ОТЧЕТЫ (Бизнес-процесс 4.3) ---
-
-func getReports(w http.ResponseWriter, r *http.Request) {
-	// В реале: SQL-агрегации (SUM, COUNT, AVG)
-	// Эмуляция отчета со встроенной математикой
-	report := map[string]interface{}{
-		"period":         "week",
-		"total_tonnage":  12500.5, // SUM(weight_kg * reps)
-		"total_distance": 15000.0, // SUM(distance_m)
-		"workouts_count": 3,
-	}
-	sendJSON(w, http.StatusOK, report)
-}
-
-// --- MAIN ---
 
 func main() {
 	r := mux.NewRouter()
 
-	// 1. Авторизация (Бизнес-процесс 4.1)
-	r.HandleFunc("/api/register", registerUser).Methods("POST")
-	r.HandleFunc("/api/login", loginUser).Methods("POST")
+	// Пользователи
+	r.HandleFunc("/api/users", registerUser).Methods("POST") // Регистрация
+	r.HandleFunc("/api/login", loginUser).Methods("POST")    // Вход
+	r.HandleFunc("/api/users/{id}", deleteUser).Methods("DELETE")
 
-	// 2. Справочник
+	// Упражнения
 	r.HandleFunc("/api/exercises", getExercises).Methods("GET")
+	r.HandleFunc("/api/exercises", createExercise).Methods("POST")
+	r.HandleFunc("/api/exercises/{id}", deleteExercise).Methods("DELETE")
 
-	// 3. Тренировки (Бизнес-процесс 4.2)
-	r.HandleFunc("/api/workouts", getWorkouts).Methods("GET")         // История
-	r.HandleFunc("/api/workouts", createWorkout).Methods("POST")      // Создание (отправка JSON)
-	r.HandleFunc("/api/workouts/{id}", getWorkoutByID).Methods("GET") // Детали
+	// Тренировки
+	r.HandleFunc("/api/workouts", createWorkout).Methods("POST")
+	r.HandleFunc("/api/workouts/{id}", deleteWorkout).Methods("DELETE")
+	r.HandleFunc("/api/workouts/{id}", updateWorkout).Methods("PUT")
 
-	// 4. Отчеты (Бизнес-процесс 4.3)
-	r.HandleFunc("/api/reports", getReports).Methods("GET")
+	// Отчеты
+	r.HandleFunc("/api/reports/volume", getReport1).Methods("GET")
+	r.HandleFunc("/api/reports/max-weight", getReport2).Methods("GET")
 
 	fmt.Println("Сервер запущен на http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", r))
