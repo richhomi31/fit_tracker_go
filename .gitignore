@@ -1,0 +1,18 @@
+# Бинарники Go (создаются при go build)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+fit_tracker_go
+
+# Файлы окружения (если будешь хранить пароли там)
+.env
+
+# Настройки редакторов (VS Code, GoLand / IDEA)
+.vscode/
+.idea/
+
+# Системный мусор (macOS, Windows)
+.DS_Store
+Thumbs.db
