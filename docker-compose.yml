@@ -1,16 +1,23 @@
 services:
   db:
     image: postgres:18
-    container_name: fit_tracker_db
-    restart: always
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${FIT_TRACKER_DB_PORT:-55432}:5432"
+    networks:
+      - database
     environment:
       POSTGRES_USER: dev
       POSTGRES_PASSWORD: devpassword
       POSTGRES_DB: fit_tracker
     volumes:
       - postgres_data:/var/lib/postgresql
+      - ./migration/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
 volumes:
   postgres_data:
+
+networks:
+  database:
+    ipam:
+      config:
+        - subnet: ${FIT_TRACKER_DB_SUBNET:-172.29.244.0/24}

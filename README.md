@@ -44,3 +44,89 @@
 ### 5. Схема БД
 ![Схема БД](image.png)
  
+
+### 6. Лабораторная работа № 4
+
+В Go моделям соответствуют таблицы `users`, `exercises`, `workouts`,
+`workout_sets` и `gps_points`. Репозитории используют `sqlx` и драйвер `lib/pq`.
+При завершении тренировки сервер сохраняет тренировку, подходы и GPS-точки
+в одной транзакции. Дистанция вычисляется сервером по последовательным точкам,
+упорядоченным по времени записи.
+
+#### Запуск
+
+```bash
+docker compose up -d --no-deps db
+docker compose exec -T db pg_isready -U dev -d fit_tracker
+export DATABASE_URL='postgres://dev:devpassword@127.0.0.1:55432/fit_tracker?sslmode=disable'
+go run ./cmd/app
+```
+
+При первой инициализации тома PostgreSQL применяет `migration/init.sql`.
+Для тома со схемой из раннего черновика лабораторной, где `users.gender`
+обязателен и даты хранятся без часового пояса, однократно примените
+`migration/upgrade/from_draft.sql`:
+
+```bash
+docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U dev -d fit_tracker \
+  < migration/upgrade/from_draft.sql
+```
+
+`FIT_TRACKER_DB_PORT` задаёт порт PostgreSQL на хосте, по умолчанию 55432.
+`FIT_TRACKER_DB_SUBNET` задаёт подсеть проекта, по умолчанию `172.29.244.0/24`.
+HTTP-сервер по умолчанию слушает `localhost:8080`, адрес задаётся в `HTTP_ADDR`.
+
+#### HTTP API
+
+| Методы | Маршрут | Действие |
+| --- | --- | --- |
+| POST | `/api/users` | Регистрация с полями `email`, `password`, `name` |
+| POST | `/api/login` | Проверка почты и пароля |
+| GET, PUT, DELETE | `/api/users/{id}` | Чтение, изменение имени и пола, удаление своего профиля |
+| GET, POST | `/api/exercises` | Список доступных упражнений и добавление своего упражнения |
+| GET, PUT, DELETE | `/api/exercises/{id}` | Чтение упражнения, изменение названия и группы мышц или удаление своего упражнения |
+| GET, POST | `/api/workouts` | Список своих тренировок и создание тренировки |
+| GET, PUT, DELETE | `/api/workouts/{id}` | Чтение с подходами и точками, полная замена содержимого и удаление своей тренировки |
+| GET | `/api/reports/{metric}` | Агрегаты завершённых тренировок по упражнениям |
+
+Защищённые маршруты принимают HTTP Basic с почтой и паролем.
+Тип упражнения задаётся при создании. При удалении используемого упражнения
+API возвращает `409 Conflict`. Метрики отчёта — `volume`, `max-weight` и
+`distance`. Параметр `period` принимает `day`, `week` или `month`. При пустом
+периоде используется вся история. Параметр `exercise_id` фильтрует упражнение.
+
+Пример создания черновика:
+
+```bash
+curl -sS -u 'student@example.test:example-password' \
+  -H 'Content-Type: application/json' -d '{}' http://localhost:8080/api/workouts
+```
+
+Далее отправьте `PUT /api/workouts/{id}` с полным содержимым. Идентификаторы
+упражнений возьмите из `GET /api/exercises`. Если переданы упражнения,
+сервер проставляет `finished_at` автоматически, когда поле отсутствует.
+В примере ниже указаны идентификаторы для новой базы после
+`migration/init.sql`. Формат дат — RFC 3339.
+
+```json
+{
+  "started_at": "2026-11-24T10:00:00Z",
+  "finished_at": "2026-11-24T11:00:00Z",
+  "notes": "Зал и пробежка",
+  "exercises": [
+    {"exercise_id": 1, "sets": [{"set_number": 1, "weight_kg": 25, "reps": 8}]},
+    {"exercise_id": 2, "cardio": {"duration_seconds": 300}},
+    {"exercise_id": 3, "cardio": {"duration_seconds": 120, "gps_points": [
+      {"lat": 55, "lon": 83, "recorded_at": "2026-11-24T10:30:00Z"},
+      {"lat": 55.001, "lon": 83, "recorded_at": "2026-11-24T10:32:00Z"}
+    ]}}
+  ]
+}
+```
+
+Проверка сборки и статический анализ:
+
+```bash
+go test ./...
+go vet ./...
+```
